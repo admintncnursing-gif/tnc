@@ -182,12 +182,12 @@ async function loadCourseContent(courseId: string): Promise<{
   }
   if (chapterIds.length) {
     queries.push(tncProtectedRequest("fe", { json: "*" }, {
-      sch: "t_ch", cond: { "(row_id)": chapterIds }, limit: 1000,
+      sch: "t_ch", cond: { "(row_id)": chapterIds }, limit: 100_000,
     }));
   }
   if (linkedSubjectIds.length) {
     queries.push(tncProtectedRequest("fe", { json: "*" }, {
-      sch: "t_ch", cond: { "(su_refid)": linkedSubjectIds }, limit: 1000,
+      sch: "t_ch", cond: { "(su_refid)": linkedSubjectIds }, limit: 100_000,
     }));
   }
   const contentRows = (await Promise.all(queries)).flatMap((data) => Array.isArray(data) ? data as Record<string, unknown>[] : []);
@@ -251,6 +251,14 @@ function deriveSubject(title: string): { rowId: string; name: string } {
     if (pattern.test(normalized)) return { rowId, name };
   }
   return { rowId: "uncategorized", name: "Uncategorized" };
+}
+
+function titleMatchesSubject(title: string, subjectName: string): boolean {
+  const normalizedTitle = title.trim().replace(/^\d+\s*[.):\-]\s*/, "").toLowerCase();
+  const normalizedSubject = subjectName.trim().toLowerCase();
+  if (!normalizedTitle || !normalizedSubject || !normalizedTitle.startsWith(normalizedSubject)) return false;
+  const remainder = normalizedTitle.slice(normalizedSubject.length);
+  return remainder.length === 0 || /^[\s:/|()[\]-]/.test(remainder);
 }
 
 function isYouTubeUrl(url: unknown): boolean {
@@ -568,7 +576,8 @@ router.get("/subjects", requireApprovedSiteUser, async (req: Request, res: Respo
       for (const row of contentData as Record<string, unknown>[]) {
         const parsed = parseChapter(row);
         const subjectId = parsed.subjectId?.trim() || "uncategorized";
-        let subject = subjectById.get(subjectId);
+        let subject = subjectById.get(subjectId)
+          ?? subjects.find((candidate) => titleMatchesSubject(parsed.title, candidate.name));
         if (!subject) {
           const derived = deriveSubject(parsed.title);
           subject = {
@@ -742,9 +751,15 @@ router.get("/notes", requireApprovedSiteUser, async (req: Request, res: Response
 router.get("/sessions", requireApprovedSiteUser, async (req: Request, res: Response): Promise<void> => {
   try {
     const { courseId, subjectId, limit: limitParam, type, sort, page: pageParam, search } = req.query;
-    const data = typeof courseId === "string"
-      ? (await loadCourseContent(courseId)).contentData
-      : await tncProtectedRequest("fe", { json: "*" }, { sch: "t_ch", cond: {}, limit: 1000 });
+    let subjectData: unknown = [];
+    let data: unknown;
+    if (typeof courseId === "string") {
+      const courseContent = await loadCourseContent(courseId);
+      subjectData = courseContent.subjectData;
+      data = courseContent.contentData;
+    } else {
+      data = await tncProtectedRequest("fe", { json: "*" }, { sch: "t_ch", cond: {}, limit: 1000 });
+    }
     const requestedSubjectId = typeof subjectId === "string" ? subjectId.trim() : "";
 
     if (!Array.isArray(data)) {
@@ -753,7 +768,15 @@ router.get("/sessions", requireApprovedSiteUser, async (req: Request, res: Respo
     }
 
     let sessions = (data as Record<string, unknown>[]).map(parseChapter);
-    if (requestedSubjectId) sessions = sessions.filter((session) => session.subjectId === requestedSubjectId);
+    if (requestedSubjectId) {
+      const subjectRows = Array.isArray(subjectData) ? subjectData as Record<string, unknown>[] : [];
+      const knownSubjectIds = new Set(subjectRows.map((row) => String(row.row_id ?? "").trim()).filter(Boolean));
+      const selectedSubject = subjectRows.find((row) => String(row.row_id ?? "").trim() === requestedSubjectId);
+      const subjectName = String(recordJson(selectedSubject?.json)._na ?? "");
+      sessions = sessions.filter((session) => session.subjectId === requestedSubjectId || (
+        !knownSubjectIds.has(session.subjectId) && titleMatchesSubject(session.title, subjectName)
+      ));
+    }
 
     // Filter by search query if provided
     if (search && typeof search === "string" && search.trim().length > 0) {
