@@ -261,6 +261,12 @@ function titleMatchesSubject(title: string, subjectName: string): boolean {
   return remainder.length === 0 || /^[\s:/|()[\]-]/.test(remainder);
 }
 
+function findSubjectByTitle<T extends { name: string }>(title: string, subjects: T[]): T | undefined {
+  return [...subjects]
+    .sort((left, right) => right.name.trim().length - left.name.trim().length)
+    .find((subject) => titleMatchesSubject(title, subject.name));
+}
+
 function isYouTubeUrl(url: unknown): boolean {
   if (typeof url !== "string" || !url.startsWith("http")) return false;
   return url.includes("youtube.com") || url.includes("youtu.be");
@@ -576,8 +582,7 @@ router.get("/subjects", requireApprovedSiteUser, async (req: Request, res: Respo
       for (const row of contentData as Record<string, unknown>[]) {
         const parsed = parseChapter(row);
         const subjectId = parsed.subjectId?.trim() || "uncategorized";
-        let subject = subjectById.get(subjectId)
-          ?? subjects.find((candidate) => titleMatchesSubject(parsed.title, candidate.name));
+        let subject = findSubjectByTitle(parsed.title, subjects) ?? subjectById.get(subjectId);
         if (!subject) {
           const derived = deriveSubject(parsed.title);
           subject = {
@@ -770,12 +775,14 @@ router.get("/sessions", requireApprovedSiteUser, async (req: Request, res: Respo
     let sessions = (data as Record<string, unknown>[]).map(parseChapter);
     if (requestedSubjectId) {
       const subjectRows = Array.isArray(subjectData) ? subjectData as Record<string, unknown>[] : [];
-      const knownSubjectIds = new Set(subjectRows.map((row) => String(row.row_id ?? "").trim()).filter(Boolean));
-      const selectedSubject = subjectRows.find((row) => String(row.row_id ?? "").trim() === requestedSubjectId);
-      const subjectName = String(recordJson(selectedSubject?.json)._na ?? "");
-      sessions = sessions.filter((session) => session.subjectId === requestedSubjectId || (
-        !knownSubjectIds.has(session.subjectId) && titleMatchesSubject(session.title, subjectName)
-      ));
+      const courseSubjects = subjectRows.map((row) => ({
+        rowId: String(row.row_id ?? "").trim(),
+        name: String(recordJson(row.json)._na ?? "").trim(),
+      })).filter((subject) => subject.rowId && subject.name);
+      sessions = sessions.filter((session) => {
+        const titleSubject = findSubjectByTitle(session.title, courseSubjects);
+        return titleSubject ? titleSubject.rowId === requestedSubjectId : session.subjectId === requestedSubjectId;
+      });
     }
 
     // Filter by search query if provided
