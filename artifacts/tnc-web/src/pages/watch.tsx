@@ -41,6 +41,7 @@ function formatTime(seconds: number): string {
 
 function HlsPlayer({ src, sessionId }: { src: string; sessionId?: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const retryRef = useRef<() => void>(() => {});
   const [error, setError] = useState(false);
   const [buffering, setBuffering] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
@@ -57,15 +58,25 @@ function HlsPlayer({ src, sessionId }: { src: string; sessionId?: string }) {
     setError(false);
     setBuffering(true);
     let cleanup: (() => void) | undefined;
+    let cancelled = false;
+    let recoveryAttempts = 0;
+    let retryPlayback = () => {
+      video.src = src;
+      video.load();
+    };
 
     const isHls = src.includes(".m3u8");
     const isProxied = src.startsWith("/api/media-proxy");
 
     const onCanPlay = () => setBuffering(false);
     const onWaiting = () => setBuffering(true);
-    const onPlaying = () => setBuffering(false);
+    const onPlaying = () => {
+      setBuffering(false);
+      recoveryAttempts = 0;
+    };
     const onTimeUpdate = () => setCurrentTime(video.currentTime);
     const onLoadedMetadata = () => setDuration(video.duration);
+    const onVideoError = () => setError(true);
     const onVolumeChange = () => {
       setIsMuted(video.muted);
       setVolume(video.volume);
@@ -78,8 +89,11 @@ function HlsPlayer({ src, sessionId }: { src: string; sessionId?: string }) {
     video.addEventListener("loadedmetadata", onLoadedMetadata);
     video.addEventListener("volumechange", onVolumeChange);
 
+    retryRef.current = retryPlayback;
+
     if (isHls && !isProxied) {
       import("hls.js").then(({ default: Hls }) => {
+        if (cancelled) return;
         if (Hls.isSupported()) {
           const hls = new Hls({
             enableWorker: true,
@@ -91,23 +105,45 @@ function HlsPlayer({ src, sessionId }: { src: string; sessionId?: string }) {
             abrEwmaFastLive: 3.0,
             abrEwmaSlowLive: 9.0,
             progressive: true,
+            manifestLoadingMaxRetry: 4,
+            levelLoadingMaxRetry: 4,
+            fragLoadingMaxRetry: 6,
           });
+          retryPlayback = () => {
+            recoveryAttempts = 0;
+            hls.startLoad(video.currentTime);
+          };
+          retryRef.current = retryPlayback;
           hls.loadSource(src);
           hls.attachMedia(video);
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
             setBuffering(false);
           });
           hls.on(Hls.Events.ERROR, (_e, data) => {
-            if (data.fatal) setError(true);
+            if (!data.fatal) return;
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR && recoveryAttempts < 3) {
+              recoveryAttempts += 1;
+              hls.startLoad(video.currentTime);
+            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && recoveryAttempts < 3) {
+              recoveryAttempts += 1;
+              hls.recoverMediaError();
+            } else {
+              setError(true);
+            }
           });
           cleanup = () => hls.destroy();
         } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          video.addEventListener("error", onVideoError);
           video.src = src;
+        } else {
+          setError(true);
         }
+      }).catch(() => {
+        if (!cancelled) setError(true);
       });
     } else {
+      video.addEventListener("error", onVideoError);
       video.src = src;
-      video.onerror = () => setError(true);
     }
 
     if (sessionId) {
@@ -121,12 +157,15 @@ function HlsPlayer({ src, sessionId }: { src: string; sessionId?: string }) {
     }
 
     return () => {
+      cancelled = true;
+      retryRef.current = () => {};
       video.removeEventListener("canplay", onCanPlay);
       video.removeEventListener("waiting", onWaiting);
       video.removeEventListener("playing", onPlaying);
       video.removeEventListener("timeupdate", onTimeUpdate);
       video.removeEventListener("loadedmetadata", onLoadedMetadata);
       video.removeEventListener("volumechange", onVolumeChange);
+      video.removeEventListener("error", onVideoError);
       cleanup?.();
     };
   }, [src, sessionId]);
@@ -182,26 +221,28 @@ function HlsPlayer({ src, sessionId }: { src: string; sessionId?: string }) {
     }
   };
 
-  if (error) {
-    return (
-      <div className="w-full h-64 bg-black rounded-xl flex flex-col items-center justify-center text-white/60 gap-3">
-        <AlertCircle size={36} />
-        <p className="text-sm">Video failed to load. Try refreshing.</p>
-        <button
-          onClick={() => { setError(false); if (videoRef.current) videoRef.current.load(); }}
-          className="px-4 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-sm transition-colors"
-        >
-          Retry
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-black shadow-2xl">
-      {buffering && (
+      {buffering && !error && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-10 pointer-events-none">
           <Loader2 size={40} className="text-white animate-spin" />
+        </div>
+      )}
+      {error && (
+        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-black/85 text-white/70">
+          <AlertCircle size={36} />
+          <p className="text-sm">Video playback was interrupted.</p>
+          <button
+            type="button"
+            onClick={() => {
+              setError(false);
+              setBuffering(true);
+              retryRef.current();
+            }}
+            className="rounded-lg bg-white/15 px-4 py-1.5 text-sm transition-colors hover:bg-white/25"
+          >
+            Retry
+          </button>
         </div>
       )}
       <video
