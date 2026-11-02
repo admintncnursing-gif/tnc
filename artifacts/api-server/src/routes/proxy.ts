@@ -289,13 +289,14 @@ function isPdfCandidate(url: unknown, pdfField = false): boolean {
   const value = url.trim();
   if (!value) return false;
   if (isYouTubeUrl(value)) return false;
-  if (/\.(mp4|m3u8|webm|mov|avi|mkv)(\?|$)/i.test(value)) return false;
-  if (/youtube|vimeo|bunny|video|stream|cloudfront|cdn/i.test(value)) return false;
+  const path = value.split(/[?#]/, 1)[0];
+  if (/\.(mp4|m3u8|webm|mov|avi|mkv)$/i.test(path)) return false;
   // More permissive PDF detection
   if (/\.pdf(\?|$)/i.test(value)) return true;
   if (value.includes("/pdf/") || value.includes("application/pdf")) return true;
   if (pdfField && /^https?:\/\//i.test(value)) return true;
   if (pdfField && /^\/?uploads\//i.test(value)) return true;
+  if (/youtube|vimeo|bunny|video|stream|cloudfront|cdn/i.test(value)) return false;
   // Also accept common document paths
   if (value.includes("/uploads/") && (value.includes(".pdf") || value.includes("document") || value.includes("note"))) return true;
   if (value.includes("drive.google.com") || value.includes("docs.google.com")) return true;
