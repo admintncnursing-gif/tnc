@@ -88,6 +88,22 @@ function recordJson(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function tncRows(value: unknown): Record<string, unknown>[] {
+  const unwrapped = unwrapJson(value);
+  if (Array.isArray(unwrapped)) {
+    return unwrapped.filter((row): row is Record<string, unknown> =>
+      Boolean(row) && typeof row === "object" && !Array.isArray(row),
+    );
+  }
+  if (!unwrapped || typeof unwrapped !== "object") return [];
+  const response = unwrapped as Record<string, unknown>;
+  for (const key of ["data", "rows", "records", "result", "items"]) {
+    const rows = tncRows(response[key]);
+    if (rows.length) return rows;
+  }
+  return [];
+}
+
 function loadPdfCandidates(json: Record<string, unknown>): string[] {
   const roots = [
     { value: recordJson(json._de)._no, pdfField: true },
@@ -142,34 +158,30 @@ function pdfProxyUrl(candidate: string): string {
 }
 
 async function loadCourseContent(courseId: string): Promise<{
-  subjectData: unknown;
-  contentData: unknown;
+  subjectData: Record<string, unknown>[];
+  contentData: Record<string, unknown>[];
 }> {
-  const batches = await tncProtectedRequest("fe_co", { limit: 1000 });
-  const batch = Array.isArray(batches)
-    ? (batches as Record<string, unknown>[]).find((row) => String(row.row_id ?? "") === courseId)
-    : undefined;
+  const batches = tncRows(await tncProtectedRequest("fe_co"));
+  const batch = batches.find((row) => String(row.row_id ?? "") === courseId);
   const batchJson = recordJson(batch?.json);
   const subjectIds = Array.isArray(batchJson._su) ? [...new Set(batchJson._su.filter((id): id is string => typeof id === "string" && Boolean(id)))] : [];
   const chapterIds = Array.isArray(batchJson._ch) ? [...new Set(batchJson._ch.filter((id): id is string => typeof id === "string" && Boolean(id)))] : [];
   const parentCourseIds = Array.isArray(batchJson._co) ? batchJson._co.filter((id): id is string => typeof id === "string" && Boolean(id)) : [];
   const courseRefId = String(batch?.course_id ?? batch?.wc_refid ?? batchJson.course_id ?? batchJson.wc_refid ?? parentCourseIds[0] ?? courseId);
 
-  let subjectData: unknown = [];
+  let subjectData: Record<string, unknown>[] = [];
   if (subjectIds.length) {
-    subjectData = await tncProtectedRequest("fe", { json: "*" }, {
+    subjectData = tncRows(await tncProtectedRequest("fe", { json: "*" }, {
       sch: "t_su", cond: { "(row_id)": subjectIds }, limit: 1000,
-    });
+    }));
   }
-  if (!Array.isArray(subjectData) || subjectData.length === 0) {
-    subjectData = await tncProtectedRequest("fe", { json: "*" }, {
+  if (subjectData.length === 0) {
+    subjectData = tncRows(await tncProtectedRequest("fe", { json: "*" }, {
       sch: "t_su", cond: { co_refid: courseRefId }, limit: 1000,
-    });
+    }));
   }
 
-  const linkedSubjectIds = Array.isArray(subjectData)
-    ? [...new Set((subjectData as Record<string, unknown>[]).map((row) => String(row.row_id ?? "").trim()).filter(Boolean))]
-    : [];
+  const linkedSubjectIds = [...new Set(subjectData.map((row) => String(row.row_id ?? "").trim()).filter(Boolean))];
   const queries: Promise<unknown>[] = [
     tncProtectedRequest("fe", { json: "*" }, {
       sch: "t_ch", cond: { co_refid: courseRefId }, limit: 100_000,
@@ -180,9 +192,9 @@ async function loadCourseContent(courseId: string): Promise<{
       sch: "t_ch", cond: { co_refid: courseId }, limit: 100_000,
     }));
   }
-  if (chapterIds.length) {
+  for (let index = 0; index < chapterIds.length; index += 100) {
     queries.push(tncProtectedRequest("fe", { json: "*" }, {
-      sch: "t_ch", cond: { "(row_id)": chapterIds }, limit: 100_000,
+      sch: "t_ch", cond: { "(row_id)": chapterIds.slice(index, index + 100) }, limit: 1000,
     }));
   }
   if (linkedSubjectIds.length) {
@@ -190,7 +202,7 @@ async function loadCourseContent(courseId: string): Promise<{
       sch: "t_ch", cond: { "(su_refid)": linkedSubjectIds }, limit: 100_000,
     }));
   }
-  const contentRows = (await Promise.all(queries)).flatMap((data) => Array.isArray(data) ? data as Record<string, unknown>[] : []);
+  const contentRows = (await Promise.all(queries)).flatMap(tncRows);
   const contentData = [...new Map(contentRows.map((row) => [String(row.row_id ?? row.id ?? JSON.stringify(row)), row])).values()];
   return { subjectData, contentData };
 }
