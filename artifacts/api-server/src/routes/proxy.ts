@@ -167,7 +167,7 @@ async function loadCourseContent(courseId: string): Promise<{
   const subjectIds = Array.isArray(batchJson._su) ? [...new Set(batchJson._su.filter((id): id is string => typeof id === "string" && Boolean(id)))] : [];
   const chapterIds = Array.isArray(batchJson._ch) ? [...new Set(batchJson._ch.filter((id): id is string => typeof id === "string" && Boolean(id)))] : [];
   const parentCourseIds = Array.isArray(batchJson._co) ? batchJson._co.filter((id): id is string => typeof id === "string" && Boolean(id)) : [];
-  const courseRefId = String(batch?.course_id ?? batch?.wc_refid ?? batchJson.course_id ?? batchJson.wc_refid ?? parentCourseIds[0] ?? courseId);
+  const courseRefId = String(parentCourseIds[0] ?? batch?.course_id ?? batch?.wc_refid ?? batchJson.course_id ?? batchJson.wc_refid ?? courseId);
 
   let subjectData: Record<string, unknown>[] = [];
   if (subjectIds.length) {
@@ -293,8 +293,8 @@ function resolveChapterSubject<T extends { rowId: string; name: string }>(
 ): T | undefined {
   const json = recordJson(row.json);
   const subjectId = String(row.su_refid ?? json._su ?? "").trim();
-  return subjects.find((subject) => subject.rowId === subjectId)
-    ?? findSubjectByTitle(String(json._na ?? ""), subjects);
+  if (subjectId) return subjects.find((subject) => subject.rowId === subjectId);
+  return findSubjectByTitle(String(json._na ?? ""), subjects);
 }
 
 function isYouTubeUrl(url: unknown): boolean {
@@ -615,6 +615,9 @@ router.get("/subjects", requireApprovedSiteUser, async (req: Request, res: Respo
         const subjectId = parsed.subjectId?.trim() || "uncategorized";
         let subject = resolveChapterSubject(row, subjects) ?? subjectById.get(subjectId);
         if (!subject) {
+          const json = recordJson(row.json);
+          const sourceSubjectId = String(row.su_refid ?? json._su ?? "").trim();
+          if (sourceSubjectId) continue;
           const derived = deriveSubject(parsed.title);
           subject = {
             id: 0,

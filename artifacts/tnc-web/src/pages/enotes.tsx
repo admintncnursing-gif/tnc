@@ -82,14 +82,8 @@ function CourseNoteRow({
   const { data: notes, isLoading: notesLoading } = useCourseNotes(course.rowId, open && Boolean(selectedSubjectId));
   const normalizedSearch = search.trim().toLowerCase();
   const visibleSubjects = (subjects ?? []).filter((subject) => subject.name.toLowerCase().includes(normalizedSearch));
-  const selectedSubject = (subjects ?? []).find((subject) => subject.rowId === selectedSubjectId);
-  const subjectName = selectedSubject?.name.trim().toLowerCase() ?? "";
   const subjectNotes = (notes ?? []).filter((note) => {
-    const title = note.title.trim().toLowerCase();
-    const matchesSubjectTitle = Boolean(subjectName) && (
-      title === subjectName || [" ", "-", ":", "/"].some((separator) => title.startsWith(`${subjectName}${separator}`))
-    );
-    return (note.subjectId === selectedSubjectId || matchesSubjectTitle) && title.includes(normalizedSearch);
+    return note.subjectId === selectedSubjectId && note.title.toLowerCase().includes(normalizedSearch);
   });
   const isLoading = subjectsLoading || (Boolean(selectedSubjectId) && notesLoading);
 
