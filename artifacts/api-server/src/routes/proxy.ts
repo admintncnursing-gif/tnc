@@ -151,7 +151,8 @@ function loadPdfCandidates(json: Record<string, unknown>): string[] {
 function pdfProxyUrl(candidate: string): string {
   const resolved = new URL(candidate.replace(/\\\//g, "/"), `${CRM_BASE}/`);
   if (resolved.hostname === new URL(CRM_BASE).hostname && !resolved.search) {
-    const path = resolved.pathname.replace(/^\/+/, "");
+    const rawPath = resolved.pathname.replace(/^\/+/, "");
+    const path = rawPath.startsWith("uploads/") ? rawPath : `uploads/${rawPath}`;
     return `/api/pdf?path=${encodeURIComponent(path)}`;
   }
   return `/api/pdf?url=${encodeURIComponent(resolved.toString())}`;
@@ -580,6 +581,22 @@ router.get("/courses", async (_req: Request, res: Response): Promise<void> => {
     if (sendTncLoginRequired(res, err)) return;
     logger.error({ err }, "Failed to fetch courses");
     res.status(500).json({ error: "Failed to fetch courses" });
+  }
+});
+
+// GET /api/note-courses — dedicated courses from t_co whose names identify them as notes
+router.get("/note-courses", async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const data = await tncProtectedRequest("fe", { json: "*" }, { sch: "t_co", cond: {}, limit: 1000 });
+    const courses = tncRows(data)
+      .map(parseCourse)
+      .filter((course) => /\bnotes?\b/i.test(String(course.name)));
+    courses.sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")));
+    res.json(courses);
+  } catch (err) {
+    if (sendTncLoginRequired(res, err)) return;
+    logger.error({ err }, "Failed to fetch note courses");
+    res.status(500).json({ error: "Failed to fetch note courses" });
   }
 });
 

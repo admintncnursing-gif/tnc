@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import {
-  useGetCourses,
   useGetPromoStatus,
   useGetUserPurchases,
   getGetUserPurchasesQueryKey,
@@ -37,6 +36,13 @@ interface NoteSubject {
   totalCount: number;
 }
 
+interface NoteCourse {
+  rowId: string;
+  name: string;
+  description?: string;
+  imageUrl?: string | null;
+}
+
 // ─── Hook: fetch PDFs for one course on demand ────────────────────────────────
 function useCourseNotes(courseId: string | null, enabled: boolean) {
   return useQuery<NoteSession[]>({
@@ -53,6 +59,14 @@ function useCourseSubjects(courseId: string | null, enabled: boolean) {
     queryKey: ["subjects", courseId],
     queryFn: () => customFetch<NoteSubject[]>(`/api/subjects?courseId=${encodeURIComponent(courseId ?? "")}`),
     enabled: Boolean(courseId && enabled),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+function useNoteCourses() {
+  return useQuery<NoteCourse[]>({
+    queryKey: ["note-courses"],
+    queryFn: () => customFetch<NoteCourse[]>("/api/note-courses"),
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -339,7 +353,7 @@ export default function EnotesPage() {
   const user = getUser();
   const [search, setSearch] = useState("");
 
-  const { data: courses, isLoading } = useGetCourses();
+  const { data: courses, isLoading } = useNoteCourses();
   const { data: promo } = useGetPromoStatus();
   const { data: purchases } = useGetUserPurchases(user?.userId ?? "", {
     query: { enabled: !!user, queryKey: getGetUserPurchasesQueryKey(user?.userId ?? "") },
