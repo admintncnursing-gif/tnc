@@ -203,7 +203,15 @@ async function loadCourseContent(courseId: string): Promise<{
     }));
   }
   const contentRows = (await Promise.all(queries)).flatMap(tncRows);
-  const contentData = [...new Map(contentRows.map((row) => [String(row.row_id ?? row.id ?? JSON.stringify(row)), row])).values()];
+  const declaredChapterIds = new Set(chapterIds);
+  const allowedCourseIds = new Set([courseId, courseRefId]);
+  const contentData = [...new Map(contentRows
+    .filter((row) => {
+      const rowId = String(row.row_id ?? row.id ?? "").trim();
+      const rowCourseId = String(row.co_refid ?? recordJson(row.json)._co ?? "").trim();
+      return declaredChapterIds.has(rowId) || allowedCourseIds.has(rowCourseId);
+    })
+    .map((row) => [String(row.row_id ?? row.id ?? JSON.stringify(row)), row])).values()];
   return { subjectData, contentData };
 }
 
@@ -277,6 +285,16 @@ function findSubjectByTitle<T extends { name: string }>(title: string, subjects:
   return [...subjects]
     .sort((left, right) => right.name.trim().length - left.name.trim().length)
     .find((subject) => titleMatchesSubject(title, subject.name));
+}
+
+function resolveChapterSubject<T extends { rowId: string; name: string }>(
+  row: Record<string, unknown>,
+  subjects: T[],
+): T | undefined {
+  const json = recordJson(row.json);
+  const subjectId = String(row.su_refid ?? json._su ?? "").trim();
+  return subjects.find((subject) => subject.rowId === subjectId)
+    ?? findSubjectByTitle(String(json._na ?? ""), subjects);
 }
 
 function isYouTubeUrl(url: unknown): boolean {
@@ -595,7 +613,7 @@ router.get("/subjects", requireApprovedSiteUser, async (req: Request, res: Respo
       for (const row of contentData as Record<string, unknown>[]) {
         const parsed = parseChapter(row);
         const subjectId = parsed.subjectId?.trim() || "uncategorized";
-        let subject = findSubjectByTitle(parsed.title, subjects) ?? subjectById.get(subjectId);
+        let subject = resolveChapterSubject(row, subjects) ?? subjectById.get(subjectId);
         if (!subject) {
           const derived = deriveSubject(parsed.title);
           subject = {
@@ -733,9 +751,18 @@ router.get("/media-proxy", requireApprovedSiteUser, async (req: Request, res: Re
 router.get("/notes", requireApprovedSiteUser, async (req: Request, res: Response): Promise<void> => {
   try {
     const { courseId, limit: limitParam } = req.query;
-    const data = typeof courseId === "string"
-      ? (await loadCourseContent(courseId)).contentData
-      : await tncProtectedRequest("fe", { json: "*" }, { sch: "t_ch", cond: {}, limit: 1000 });
+    let courseSubjects: Array<{ rowId: string; name: string }> = [];
+    let data: unknown;
+    if (typeof courseId === "string") {
+      const courseContent = await loadCourseContent(courseId);
+      courseSubjects = courseContent.subjectData.map((row) => ({
+        rowId: String(row.row_id ?? "").trim(),
+        name: String(recordJson(row.json)._na ?? "").trim(),
+      })).filter((subject) => subject.rowId && subject.name);
+      data = courseContent.contentData;
+    } else {
+      data = await tncProtectedRequest("fe", { json: "*" }, { sch: "t_ch", cond: {}, limit: 1000 });
+    }
 
     if (!Array.isArray(data)) {
       res.json([]);
@@ -743,7 +770,11 @@ router.get("/notes", requireApprovedSiteUser, async (req: Request, res: Response
     }
 
     const sessions = (data as Record<string, unknown>[])
-      .map(parseChapter)
+      .map((row) => {
+        const session = parseChapter(row);
+        const subject = resolveChapterSubject(row, courseSubjects);
+        return subject ? { ...session, subjectId: subject.rowId } : session;
+      })
       .filter((s) => s.pdfUrl || s.pdfUrls.length > 0 || s.contentType === "pdf");
 
     // Sort by serial number within a course, newest first globally
@@ -785,17 +816,19 @@ router.get("/sessions", requireApprovedSiteUser, async (req: Request, res: Respo
       return;
     }
 
-    let sessions = (data as Record<string, unknown>[]).map(parseChapter);
-    if (requestedSubjectId) {
-      const subjectRows = Array.isArray(subjectData) ? subjectData as Record<string, unknown>[] : [];
-      const courseSubjects = subjectRows.map((row) => ({
+    const courseSubjects = Array.isArray(subjectData)
+      ? (subjectData as Record<string, unknown>[]).map((row) => ({
         rowId: String(row.row_id ?? "").trim(),
         name: String(recordJson(row.json)._na ?? "").trim(),
-      })).filter((subject) => subject.rowId && subject.name);
-      sessions = sessions.filter((session) => {
-        const titleSubject = findSubjectByTitle(session.title, courseSubjects);
-        return titleSubject ? titleSubject.rowId === requestedSubjectId : session.subjectId === requestedSubjectId;
-      });
+      })).filter((subject) => subject.rowId && subject.name)
+      : [];
+    let sessions = (data as Record<string, unknown>[]).map((row) => {
+      const session = parseChapter(row);
+      const subject = resolveChapterSubject(row, courseSubjects);
+      return subject ? { ...session, subjectId: subject.rowId } : session;
+    });
+    if (requestedSubjectId) {
+      sessions = sessions.filter((session) => session.subjectId === requestedSubjectId);
     }
 
     // Filter by search query if provided
