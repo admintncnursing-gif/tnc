@@ -6,6 +6,7 @@ import { getTelegramUser, isTelegramWebApp, openExternalLink, openTelegramLink }
 import TncLoginPrompt from "@/components/TncLoginPrompt";
 import { useWinterEffects } from "@/components/WinterEffectsProvider";
 import { useSiteAuth } from "@/components/SiteAuthProvider";
+import { hasJoinedChannelToday, markChannelJoinedToday } from "@/lib/channelPromptState";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -82,8 +83,7 @@ export default function Layout({ children }: LayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem(DARK_MODE_KEY) === "true");
-  const [showChannelPrompt, setShowChannelPrompt] = useState(true);
-  const [channelInviteOpened, setChannelInviteOpened] = useState(false);
+  const [showChannelPrompt, setShowChannelPrompt] = useState(() => !hasJoinedChannelToday());
   const { enabled: winterEffectsEnabled, toggle: toggleWinterEffects } = useWinterEffects();
   const admin = isAdmin();
 
@@ -98,6 +98,10 @@ export default function Layout({ children }: LayoutProps) {
     };
     window.addEventListener("storage", syncTheme);
     return () => window.removeEventListener("storage", syncTheme);
+  }, []);
+
+  useEffect(() => {
+    setShowChannelPrompt(!hasJoinedChannelToday());
   }, []);
 
   function toggleDarkMode() {
@@ -134,7 +138,9 @@ export default function Layout({ children }: LayoutProps) {
   }
 
   function handleJoinChannel(event: React.MouseEvent<HTMLAnchorElement>) {
-    setChannelInviteOpened(true);
+    markChannelJoinedToday();
+    setShowChannelPrompt(false);
+
     if (isTelegramWebApp()) {
       event.preventDefault();
       openTelegramLink(CHANNEL_URL);
@@ -429,15 +435,6 @@ export default function Layout({ children }: LayoutProps) {
               <Send size={16} />
               Join Channel
             </a>
-            <button
-              type="button"
-              onClick={() => setShowChannelPrompt(false)}
-              disabled={!channelInviteOpened}
-              className="mt-3 inline-flex w-full items-center justify-center rounded-xl border border-gray-300 px-4 py-3 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-              data-testid="btn-confirm-telegram-join"
-            >
-              I've joined, continue
-            </button>
           </div>
         </div>
       )}
