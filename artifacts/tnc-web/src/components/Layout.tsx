@@ -12,7 +12,7 @@ interface LayoutProps {
 }
 
 const SUPPORT_URL = "https://t.me/testsagarbot";
-const CHANNEL_URL = "https://t.me/tnc_test_series_free";
+const CHANNEL_URL = "https://t.me/+PFYU0-GcVGswNTBl";
 const TEST_SITE_URL = "https://test.tncnursing.site/tnc-tests/";
 
 type NavItem =
@@ -31,20 +31,6 @@ const navItems: NavItem[] = [
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") ?? "";
 const DARK_MODE_KEY = "tnc-dark-mode";
-const CHANNEL_JOIN_CLICKED_AT_KEY = "tnc_channel_join_clicked_at";
-const CHANNEL_PROMPT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
-
-function shouldShowChannelPrompt(): boolean {
-  try {
-    const lastJoinedClickAt = Number(localStorage.getItem(CHANNEL_JOIN_CLICKED_AT_KEY));
-    if (Number.isFinite(lastJoinedClickAt) && lastJoinedClickAt > 0 && Date.now() - lastJoinedClickAt < CHANNEL_PROMPT_COOLDOWN_MS) {
-      return false;
-    }
-  } catch {
-    return true;
-  }
-  return true;
-}
 
 function getGreeting(): string {
   const hour = new Date().getHours();
@@ -96,7 +82,8 @@ export default function Layout({ children }: LayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem(DARK_MODE_KEY) === "true");
-  const [showChannelPrompt, setShowChannelPrompt] = useState(shouldShowChannelPrompt);
+  const [showChannelPrompt, setShowChannelPrompt] = useState(true);
+  const [channelInviteOpened, setChannelInviteOpened] = useState(false);
   const { enabled: winterEffectsEnabled, toggle: toggleWinterEffects } = useWinterEffects();
   const admin = isAdmin();
 
@@ -147,12 +134,7 @@ export default function Layout({ children }: LayoutProps) {
   }
 
   function handleJoinChannel(event: React.MouseEvent<HTMLAnchorElement>) {
-    try {
-      localStorage.setItem(CHANNEL_JOIN_CLICKED_AT_KEY, String(Date.now()));
-    } catch {
-      // Keep the prompt visible on the next page load if storage is unavailable.
-    }
-    setShowChannelPrompt(false);
+    setChannelInviteOpened(true);
     if (isTelegramWebApp()) {
       event.preventDefault();
       openTelegramLink(CHANNEL_URL);
@@ -447,6 +429,15 @@ export default function Layout({ children }: LayoutProps) {
               <Send size={16} />
               Join Channel
             </a>
+            <button
+              type="button"
+              onClick={() => setShowChannelPrompt(false)}
+              disabled={!channelInviteOpened}
+              className="mt-3 inline-flex w-full items-center justify-center rounded-xl border border-gray-300 px-4 py-3 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              data-testid="btn-confirm-telegram-join"
+            >
+              I've joined, continue
+            </button>
           </div>
         </div>
       )}
