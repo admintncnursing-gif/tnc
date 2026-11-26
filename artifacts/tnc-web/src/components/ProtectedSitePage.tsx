@@ -9,17 +9,21 @@ const SUPPORT_URL = "https://t.me/Tncnursingbot";
 
 export default function ProtectedSitePage({ children }: { children: ReactNode }) {
   const [location, setLocation] = useLocation();
-  const prevLoc = useRef(location);
+  const redirectedRef = useRef<string | null>(null);
   const { session, access, loading, refreshAccess, signOut } = useSiteAuth();
   const [helpNotice, setHelpNotice] = useState("");
 
-  // Only redirect once per navigation change. Avoid loops where the access check
-  // keeps firing while loading/settling, which caused the page to reload
-  // repeatedly and made returning from a lecture show "not found".
+  // Redirect to login at most once per location. Without this guard the access
+  // check kept firing while loading/settling, which made the page reload
+  // repeatedly and left the user on a "not found" screen after a lecture.
   useEffect(() => {
     const href = typeof location === "string" ? location : String(location ?? "");
-    if (!loading && !session && href !== prevLoc.current) {
-      prevLoc.current = href;
+    if (session) {
+      redirectedRef.current = null;
+      return;
+    }
+    if (!loading && redirectedRef.current !== href) {
+      redirectedRef.current = href;
       setLocation(`/login?next=${encodeURIComponent(href)}`);
     }
   }, [loading, session, location, setLocation]);

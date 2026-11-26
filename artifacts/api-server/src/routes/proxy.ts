@@ -249,7 +249,6 @@ function parseCourse(row: Record<string, unknown>) {
     imageUrl: buildMediaUrl(at.url as string),
     createdAt: row.cr_on as string,
     updatedAt: row.up_on,
-    coRefid: coRefid,
   };
 }
 
