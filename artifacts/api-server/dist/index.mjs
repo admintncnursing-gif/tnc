@@ -64367,7 +64367,9 @@ router2.get("/site-auth/config", (_req, res) => {
 });
 async function getSiteIdentity(req) {
   const authorization = req.header("authorization");
-  const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+  const bearerToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+  const queryToken = typeof req.query.access_token === "string" ? req.query.access_token : void 0;
+  const token = bearerToken ?? queryToken;
   if (!token) return null;
   const { data, error } = await getSupabaseAdmin().auth.getUser(token);
   if (error || !data.user?.email) return null;
@@ -65455,21 +65457,32 @@ router3.get("/media-proxy", requireApprovedSiteUser, async (req, res) => {
       res.status(403).json({ error: "Domain not allowed" });
       return;
     }
-    const upstream = await fetch(url, {
-      headers: { "Accept": "*/*" }
-    });
-    if (!upstream.ok) {
+    const upstreamHeaders = { Accept: "*/*" };
+    const range = req.headers.range;
+    if (range) upstreamHeaders.Range = range;
+    const upstream = await fetch(url, { headers: upstreamHeaders });
+    if (!upstream.ok && upstream.status !== 206) {
       res.status(upstream.status).json({ error: `Upstream error ${upstream.status}` });
       return;
     }
     const ct = upstream.headers.get("content-type") ?? "application/octet-stream";
-    const cl = upstream.headers.get("content-length");
+    res.status(upstream.status);
     res.setHeader("Content-Type", ct);
     res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Accept-Ranges", "bytes");
     res.setHeader("Cache-Control", "public, max-age=3600");
-    if (cl) res.setHeader("Content-Length", cl);
-    const buf = await upstream.arrayBuffer();
-    res.end(Buffer.from(buf));
+    for (const header of ["content-length", "content-range", "etag", "last-modified"]) {
+      const value = upstream.headers.get(header);
+      if (value) res.setHeader(header, value);
+    }
+    if (!upstream.body) {
+      res.end();
+      return;
+    }
+    const { Readable } = await import("stream");
+    const nodeStream = Readable.fromWeb(upstream.body);
+    nodeStream.on("error", () => res.end());
+    nodeStream.pipe(res);
   } catch (err) {
     logger.error({ err }, "Media proxy failed");
     res.status(500).json({ error: "Media proxy failed" });
