@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { LockKeyhole, LogOut, MessageCircle, RefreshCw } from "lucide-react";
 import PageLoader from "@/components/PageLoader";
@@ -9,11 +9,19 @@ const SUPPORT_URL = "https://t.me/Tncnursingbot";
 
 export default function ProtectedSitePage({ children }: { children: ReactNode }) {
   const [location, setLocation] = useLocation();
+  const prevLoc = useRef(location);
   const { session, access, loading, refreshAccess, signOut } = useSiteAuth();
   const [helpNotice, setHelpNotice] = useState("");
 
+  // Only redirect once per navigation change. Avoid loops where the access check
+  // keeps firing while loading/settling, which caused the page to reload
+  // repeatedly and made returning from a lecture show "not found".
   useEffect(() => {
-    if (!loading && !session) setLocation(`/login?next=${encodeURIComponent(location)}`);
+    const href = typeof location === "string" ? location : String(location ?? "");
+    if (!loading && !session && href !== prevLoc.current) {
+      prevLoc.current = href;
+      setLocation(`/login?next=${encodeURIComponent(href)}`);
+    }
   }, [loading, session, location, setLocation]);
 
   if (loading) return <PageLoader />;

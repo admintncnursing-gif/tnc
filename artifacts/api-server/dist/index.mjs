@@ -65079,7 +65079,8 @@ function parseCourse(row) {
     serialNo: json._sno ?? "",
     imageUrl: buildMediaUrl(at.url),
     createdAt: row.cr_on,
-    updatedAt: row.up_on
+    updatedAt: row.up_on,
+    coRefid
   };
 }
 function deriveSubject(title) {
@@ -65277,6 +65278,8 @@ function parseChapter(row) {
     contentType = "pdf";
   }
   const finalType = videoUrl || hasFirebaseId ? "video" : pdfUrl || hasPdfData ? "pdf" : "content";
+  const coRefid2 = row.co_refid ?? json._co;
+  const resolvedCourseId = Array.isArray(coRefid2) ? String(coRefid2[0] ?? "") : typeof coRefid2 === "string" ? coRefid2 : "";
   return {
     id: row.id,
     rowId: row.row_id,
@@ -65290,7 +65293,8 @@ function parseChapter(row) {
     videoId: videoId || null,
     contentType,
     type: finalType,
-    courseId: row.co_refid ?? json._co,
+    courseId: resolvedCourseId || null,
+    coRefid: coRefid2,
     subjectId: String(row.su_refid ?? json._su ?? derivedSubject.rowId).trim() || derivedSubject.rowId,
     isPaid: json._pr_ty === 1,
     duration: null,

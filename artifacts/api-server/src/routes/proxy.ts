@@ -249,6 +249,7 @@ function parseCourse(row: Record<string, unknown>) {
     imageUrl: buildMediaUrl(at.url as string),
     createdAt: row.cr_on as string,
     updatedAt: row.up_on,
+    coRefid: coRefid,
   };
 }
 
@@ -524,6 +525,14 @@ export function parseChapter(row: Record<string, unknown>) {
       ? "pdf"
       : "content";
 
+  const coRefid = row.co_refid ?? json._co;
+  const resolvedCourseId =
+    Array.isArray(coRefid)
+      ? String(coRefid[0] ?? "")
+      : typeof coRefid === "string"
+        ? coRefid
+        : "";
+
   return {
     id: row.id as number,
     rowId: row.row_id as string,
@@ -537,7 +546,8 @@ export function parseChapter(row: Record<string, unknown>) {
     videoId: videoId || null,
     contentType,
     type: finalType,
-    courseId: (row.co_refid ?? json._co) as string | null,
+    courseId: resolvedCourseId || null,
+    coRefid,
     subjectId: String(row.su_refid ?? json._su ?? derivedSubject.rowId).trim() || derivedSubject.rowId,
     isPaid: (json._pr_ty as number) === 1,
     duration: null as string | null,
