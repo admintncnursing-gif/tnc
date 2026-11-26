@@ -385,7 +385,7 @@ function extractYouTubeId(value: unknown): string | null {
   return match ? match[1] : null;
 }
 
-function parseChapter(row: Record<string, unknown>) {
+export function parseChapter(row: Record<string, unknown>) {
   const json = recordJson(row.json);
   const title = (json._na ?? "Untitled") as string;
   const derivedSubject = deriveSubject(title);
