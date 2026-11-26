@@ -4,7 +4,7 @@ import { useGetSession, useGetPromoStatus, useGetUserPurchases, getGetUserPurcha
 import { ArrowLeft, Lock, Video, FileText, AlertCircle, ChevronRight, PlayCircle, Loader2, Maximize, Settings, Volume2, Clock, X, SkipBack, SkipForward, VolumeX, Volume1, RotateCw, RotateCcw, CheckCircle2 } from "lucide-react";
 import Layout from "@/components/Layout";
 import { getUser } from "@/lib/auth";
-import { isVideoCompleted, markVideoWatched, toggleVideoCompleted } from "@/lib/streak";
+import { isVideoCompleted, markVideoWatched, toggleVideoCompleted, getPlaybackPosition, markPlaybackPosition } from "@/lib/streak";
 import { getTelegramUser } from "@/lib/telegram";
 import { useSiteAuth } from "@/components/SiteAuthProvider";
 import { withMediaAccessToken } from "@/lib/supabase";
@@ -69,6 +69,11 @@ function HlsPlayer({ src, sessionId }: { src: string; sessionId?: string }) {
         if (cancelled) return;
         video.src = resolvedSrc;
         video.load();
+        if (sessionId) {
+          video.addEventListener("loadedmetadata", () => {
+            void postMessage({ playbackRate });
+          });
+        }
       });
     };
     let retryPlayback = loadWithToken;
@@ -76,14 +81,29 @@ function HlsPlayer({ src, sessionId }: { src: string; sessionId?: string }) {
     const isHls = src.includes(".m3u8");
     const isProxied = src.includes("/api/media-proxy");
 
+    let lastSaved = 0;
+
     const onCanPlay = () => setBuffering(false);
     const onWaiting = () => setBuffering(true);
     const onPlaying = () => {
       setBuffering(false);
       recoveryAttempts = 0;
     };
-    const onTimeUpdate = () => setCurrentTime(video.currentTime);
-    const onLoadedMetadata = () => setDuration(video.duration);
+    const onTimeUpdate = () => {
+      setCurrentTime(video.currentTime);
+      const t = Math.floor(video.currentTime);
+      if (sessionId && t - lastSaved >= 5) {
+        lastSaved = t;
+        markPlaybackPosition(sessionId, video.currentTime);
+      }
+    };
+    const onLoadedMetadata = () => {
+    setDuration(video.duration);
+    const stored = getPlaybackPosition(sessionId ?? "");
+    if (stored > 0) {
+      video.currentTime = stored;
+    }
+  };
     const onVideoError = () => setError(true);
     const onVolumeChange = () => {
       setIsMuted(video.muted);
@@ -167,6 +187,7 @@ function HlsPlayer({ src, sessionId }: { src: string; sessionId?: string }) {
     return () => {
       cancelled = true;
       retryRef.current = () => {};
+      if (sessionId) markPlaybackPosition(sessionId, video.currentTime);
       video.removeEventListener("canplay", onCanPlay);
       video.removeEventListener("waiting", onWaiting);
       video.removeEventListener("playing", onPlaying);
@@ -567,6 +588,16 @@ export default function WatchPage() {
   const { data: purchases } = useGetUserPurchases(user?.userId ?? "", {
     query: { enabled: !!user, queryKey: getGetUserPurchasesQueryKey(user?.userId ?? "") },
   });
+
+  const courseId = session?.courseId ?? null;
+  const { data: allSessions } = useListSessions({
+    courseId: courseId ?? "",
+    query: { enabled: !!courseId, queryKey: getListSessionsQueryKey(courseId ?? "") },
+  });
+  const sessionsList = Array.isArray(allSessions) ? allSessions : [];
+  const currentIndex = sessionsList.findIndex((s) => s.id === sessionId);
+  const nextSessionId =
+    currentIndex >= 0 && currentIndex + 1 < sessionsList.length ? sessionsList[currentIndex + 1].id : null;
 
   const purchasedIds = new Set((Array.isArray(purchases) ? purchases : []).map((p) => p.courseId));
   const isCourseUnlocked = promo?.enabled || (!!session?.courseId && purchasedIds.has(session.courseId));

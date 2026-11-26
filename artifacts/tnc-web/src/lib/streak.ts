@@ -22,6 +22,7 @@ export interface WatchedVideo {
   courseId: string | null;
   watchedAt: string;
   completedAt?: string;
+  playbackSeconds?: number;
 }
 
 export interface WatchedCourse {
@@ -97,6 +98,31 @@ function recalcStreak(data: StreakData): StreakData {
   data.lastStudyDate = t;
   data.longestStreak = Math.max(data.longestStreak, data.currentStreak);
   return data;
+}
+
+const PLAYBACK_KEY = "tnc_playback";
+
+export function savePlaybackPosition(sessionId: string, seconds: number) {
+  const raw = localStorage.getItem(PLAYBACK_KEY);
+  const data = raw ? JSON.parse(raw) as Record<string, number> : {};
+  data[sessionId] = Math.round(seconds);
+  localStorage.setItem(PLAYBACK_KEY, JSON.stringify(data));
+  const existing = load().watchedVideos[sessionId];
+  if (existing) {
+    existing.playbackSeconds = Math.round(seconds);
+    save(load());
+  }
+}
+
+export function getPlaybackPosition(sessionId: string): number {
+  const raw = localStorage.getItem(PLAYBACK_KEY);
+  if (!raw) return 0;
+  try {
+    const data = JSON.parse(raw) as Record<string, number>;
+    return data[sessionId] ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
 export function markVideoWatched(sessionId: string, details?: { title?: string; courseId?: string | null }) {
@@ -183,6 +209,17 @@ export function clearWatchHistory() {
   data.completedLectures = {};
   save(data);
   window.dispatchEvent(new Event("tnc-watched-videos-updated"));
+}
+
+export function markPlaybackPosition(sessionId: string, seconds: number): boolean {
+  const data = load();
+  const existing = data.watchedVideos[sessionId];
+  if (!existing || existing.playbackSeconds === undefined) {
+    existing.playbackSeconds = Math.round(seconds);
+    save(data);
+    window.dispatchEvent(new Event("tnc-playback-position-updated"));
+  }
+  return true;
 }
 
 export function markQuizCompleted(examId: string) {
